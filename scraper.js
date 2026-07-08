@@ -13,7 +13,12 @@ async function scrapeMatchDetails(matchUrl) {
         const $ = cheerio.load(data);
 
         // العنوان
-        const title = $('h1.post-title, h3.post-title, h2.post-title').text().trim() || 'مباراة بدون عنوان';
+let title = $('meta[property="og:title"]').attr('content');
+
+if (!title) {
+    // في حال عدم وجود الميتا، نأخذ أول عنوان يقابلنا فقط لمنع تداخل النصوص
+    title = $('a.Title, h1.post-title, h3.post-title').first().text().trim() || ' بدون عنوان';
+}
         
         // الصورة (أفضل طريقة هي أخذها من الميتا تاج الخاص بالمشاركة)
         let img = $('meta[property="og:image"]').attr('content');
