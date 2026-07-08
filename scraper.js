@@ -3,7 +3,8 @@ const cheerio = require('cheerio');
 const fs = require('fs');
 
 const BASE_URL = 'https://www.footarchives.com';
-const resultsFile = 'matches.json';
+const allMatchesFile = 'AllMatches.json';
+const homeFile = 'Home.json';
 
 // دالة لاستخراج بيانات المباراة من رابط المقال
 async function scrapeMatchDetails(matchUrl) {
@@ -11,25 +12,41 @@ async function scrapeMatchDetails(matchUrl) {
         const { data } = await axios.get(matchUrl);
         const $ = cheerio.load(data);
 
-        // استخراج العنوان (تحتاج لتعديل الـ Selector حسب هيكل الموقع الفعلي)
-        const title = $('h1.post-title, h3.post-title').text().trim() || 'مباراة بدون عنوان';
+        // العنوان
+        const title = $('h1.post-title, h3.post-title, h2.post-title').text().trim() || 'مباراة بدون عنوان';
         
-        let videos = {};
+        // الصورة (أفضل طريقة هي أخذها من الميتا تاج الخاص بالمشاركة)
+        let img = $('meta[property="og:image"]').attr('content');
+        if (!img) {
+            // بديل في حال عدم وجود الميتا تاج: جلب أول صورة في المقال
+            img = $('.post-body img').first().attr('src') || '';
+        }
+
+        // الوقت/التاريخ
+        let timeText = $('.published, .post-timestamp, .date-header, time').first().text().trim();
+        if (!timeText) {
+             timeText = $('meta[property="article:published_time"]').attr('content') || 'غير معروف';
+        }
+
+        // الروابط
+        let first_half = "";
+        let second_half = "";
         const iframes = $('iframe[src*="dailymotion.com"]');
 
         if (iframes.length > 0) {
-            // غالباً الـ iframe الأول هو الشوط الأول، والثاني هو الشوط الثاني
-            videos.first_half = $(iframes[0]).attr('src');
-            
+            first_half = $(iframes[0]).attr('src');
             if (iframes.length > 1) {
-                videos.second_half = $(iframes[1]).attr('src');
+                second_half = $(iframes[1]).attr('src');
             }
         }
 
         return {
-            title,
+            title: title,
             url: matchUrl,
-            videos
+            first_half: first_half,
+            second_half: second_half,
+            img: img,
+            Time: timeText
         };
     } catch (error) {
         console.error(`خطأ في جلب تفاصيل المباراة ${matchUrl}:`, error.message);
@@ -52,20 +69,19 @@ async function scrapeAllMatches() {
             const { data } = await axios.get(currentUrl);
             const $ = cheerio.load(data);
 
-            // استخراج روابط المباريات في الصفحة الحالية
-            // (يجب التأكد من كلاس الروابط في الموقع، هنا افترضنا أنها داخل .post-title a)
             const matchLinks = [];
-            $('.post-title a, h3 a').each((i, el) => {
+            // استخراج روابط المقالات
+            $('.post-title a, h3 a, h2 a').each((i, el) => {
                 const link = $(el).attr('href');
                 if (link && !matchLinks.includes(link)) {
                     matchLinks.push(link);
                 }
             });
 
-            // جلب تفاصيل كل مباراة في الصفحة
             for (const link of matchLinks) {
                 const matchData = await scrapeMatchDetails(link);
-                if (matchData && Object.keys(matchData.videos).length > 0) {
+                // حفظ المباراة فقط إذا وجدنا فيها روابط فيديو
+                if (matchData && (matchData.first_half || matchData.second_half)) {
                     allMatches.push(matchData);
                 }
             }
@@ -86,10 +102,20 @@ async function scrapeAllMatches() {
         }
     }
 
-    // حفظ البيانات في ملف JSON
-    // الترتيب سيكون طبيعياً الأحدث أولاً لأننا بدأنا من الصفحة الرئيسية
-    fs.writeFileSync(resultsFile, JSON.stringify(allMatches, null, 2), 'utf8');
-    console.log(`تم الانتهاء بنجاح! إجمالي المباريات المستخرجة: ${allMatches.length}`);
+    // --- حفظ البيانات في ملفين ---
+    
+    // 1. ملف جميع المباريات
+    fs.writeFileSync(allMatchesFile, JSON.stringify(allMatches, null, 2), 'utf8');
+    
+    // 2. ملف الصفحة الرئيسية (أحدث 30 مباراة فقط)
+    // بما أن السكريبت يبدأ من الصفحة الأحدث، فأول 30 عنصر في المصفوفة هي الأحدث
+    const homeMatches = allMatches.slice(0, 30);
+    fs.writeFileSync(homeFile, JSON.stringify(homeMatches, null, 2), 'utf8');
+
+    console.log('-----------------------------------');
+    console.log(`تم الانتهاء بنجاح!`);
+    console.log(`إجمالي المباريات المستخرجة: ${allMatches.length} (محفوظة في ${allMatchesFile})`);
+    console.log(`أحدث 30 مباراة (محفوظة في ${homeFile})`);
 }
 
 scrapeAllMatches();
