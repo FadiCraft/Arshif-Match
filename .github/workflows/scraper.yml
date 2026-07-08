@@ -2,12 +2,17 @@ name: Match Archives Scraper
 
 on:
   schedule:
-    - cron: '0 0 * * *' # يعمل يومياً منتصف الليل
-  workflow_dispatch: # يتيح لك تشغيله يدوياً من واجهة GitHub
+    # يعمل كل 6 ساعات للبحث عن مباريات جديدة (يمكنك تعديل التوقيت حسب حاجتك)
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # يتيح لك التشغيل اليدوي بضغطة زر من تبويب Actions في GitHub
 
 jobs:
   scrape-and-update:
     runs-on: ubuntu-latest
+    
+    # إعطاء الصلاحيات اللازمة لرفع التعديلات (تحديث ملف JSON) على المستودع
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -18,8 +23,11 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Install dependencies
-        run: npm install
+      - name: Initialize and Install dependencies
+        # إنشاء ملف package.json مؤقت وتثبيت المكتبات فوراً
+        run: |
+          npm init -y
+          npm install axios cheerio
 
       - name: Run Scraper Script
         run: node scraper.js
@@ -29,6 +37,5 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Bot"
           git add matches.json
-          # نستخدم || echo حتى لا يفشل الـ workflow إذا لم يكن هناك تحديث جديد
-          git commit -m "Auto-update matches JSON" || echo "No changes to commit"
+          git commit -m "تحديث تلقائي: جلب أحدث المباريات" || echo "لا توجد مباريات جديدة لرفعها"
           git push
