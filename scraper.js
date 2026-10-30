@@ -1,10 +1,11 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const fs = require('fs');
+const path = require('path'); // إضافة مكتبة path للتعامل مع المجلدات
 
 const BASE_URL = 'https://www.footarchives.com';
-const allMatchesFile = 'AllMatches.json';
-const homeFile = 'Home.json';
+const matchDir = path.join(__dirname, 'match'); // مسار مجلد المباريات
+const homeFile = path.join(__dirname, 'Home.json'); // مسار ملف الرئيسية
 
 // دالة لاستخراج بيانات المباراة من رابط المقال
 async function scrapeMatchDetails(matchUrl) {
@@ -13,17 +14,14 @@ async function scrapeMatchDetails(matchUrl) {
         const $ = cheerio.load(data);
 
         // العنوان
-let title = $('meta[property="og:title"]').attr('content');
-
-if (!title) {
-    // في حال عدم وجود الميتا، نأخذ أول عنوان يقابلنا فقط لمنع تداخل النصوص
-    title = $('a.Title, h1.post-title, h3.post-title').first().text().trim() || ' بدون عنوان';
-}
+        let title = $('meta[property="og:title"]').attr('content');
+        if (!title) {
+            title = $('a.Title, h1.post-title, h3.post-title').first().text().trim() || ' بدون عنوان';
+        }
         
-        // الصورة (أفضل طريقة هي أخذها من الميتا تاج الخاص بالمشاركة)
+        // الصورة 
         let img = $('meta[property="og:image"]').attr('content');
         if (!img) {
-            // بديل في حال عدم وجود الميتا تاج: جلب أول صورة في المقال
             img = $('.post-body img').first().attr('src') || '';
         }
 
@@ -59,7 +57,7 @@ if (!title) {
     }
 }
 
-// الدالة الرئيسية للتنقل عبر الصفحات
+// الدالة الرئيسية
 async function scrapeAllMatches() {
     let currentUrl = BASE_URL;
     let allMatches = [];
@@ -75,6 +73,7 @@ async function scrapeAllMatches() {
             const $ = cheerio.load(data);
 
             const matchLinks = [];
+            
             // استخراج روابط المقالات
             $('.post-title a, h3 a, h2 a').each((i, el) => {
                 const link = $(el).attr('href');
@@ -85,7 +84,6 @@ async function scrapeAllMatches() {
 
             for (const link of matchLinks) {
                 const matchData = await scrapeMatchDetails(link);
-                // حفظ المباراة فقط إذا وجدنا فيها روابط فيديو
                 if (matchData && (matchData.first_half || matchData.second_half)) {
                     allMatches.push(matchData);
                 }
@@ -98,7 +96,7 @@ async function scrapeAllMatches() {
                 currentUrl = nextLink;
                 pageCount++;
             } else {
-                currentUrl = null; // التوقف عند عدم وجود صفحة تالية
+                currentUrl = null; 
             }
 
         } catch (error) {
@@ -107,20 +105,40 @@ async function scrapeAllMatches() {
         }
     }
 
-    // --- حفظ البيانات في ملفين ---
-    
-    // 1. ملف جميع المباريات
-    fs.writeFileSync(allMatchesFile, JSON.stringify(allMatches, null, 2), 'utf8');
-    
-    // 2. ملف الصفحة الرئيسية (أحدث 30 مباراة فقط)
-    // بما أن السكريبت يبدأ من الصفحة الأحدث، فأول 30 عنصر في المصفوفة هي الأحدث
+    // --- معالجة وحفظ البيانات ---
+    console.log('جاري معالجة وحفظ الملفات...');
+
+    // 1. ملف الصفحة الرئيسية (أحدث 30 مباراة)
     const homeMatches = allMatches.slice(0, 30);
     fs.writeFileSync(homeFile, JSON.stringify(homeMatches, null, 2), 'utf8');
 
+    // 2. إنشاء مجلد /match إذا لم يكن موجوداً
+    if (!fs.existsSync(matchDir)){
+        fs.mkdirSync(matchDir, { recursive: true });
+    }
+
+    // 3. تقسيم باقي المباريات (أو كل المباريات) إلى ملفات، كل ملف 500 مباراة
+    const chunkSize = 500;
+    let fileIndex = 1;
+    
+    for (let i = 0; i < allMatches.length; i += chunkSize) {
+        // اقتطاع 500 مباراة
+        const chunk = allMatches.slice(i, i + chunkSize);
+        
+        // مسار الملف واسمه (مثال: match/p1.json)
+        const filePath = path.join(matchDir, `p${fileIndex}.json`);
+        
+        // حفظ الملف
+        fs.writeFileSync(filePath, JSON.stringify(chunk, null, 2), 'utf8');
+        
+        fileIndex++;
+    }
+
     console.log('-----------------------------------');
     console.log(`تم الانتهاء بنجاح!`);
-    console.log(`إجمالي المباريات المستخرجة: ${allMatches.length} (محفوظة في ${allMatchesFile})`);
-    console.log(`أحدث 30 مباراة (محفوظة في ${homeFile})`);
+    console.log(`إجمالي المباريات المستخرجة: ${allMatches.length}`);
+    console.log(`تم حفظ أحدث 30 مباراة في: ${homeFile}`);
+    console.log(`تم حفظ جميع المباريات مقسمة (${chunkSize} مباراة لكل ملف) في مجلد: /match`);
 }
 
 scrapeAllMatches();
